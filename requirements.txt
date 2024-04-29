@@ -1,1 +1,5 @@
 PyQtUIkit~=2.7.3
+pywtdlib~=0.2.0
+PyQt6~=6.6.1
+pylottie~=2024
+appdirs~=1.4.4

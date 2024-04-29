@@ -46,8 +46,8 @@ class TelegramChatBubble(KitHBoxLayout):
         else:
             self._text = ''
 
-        self.setDirection(QHBoxLayout.Direction.RightToLeft if self._right_side else
-                          QHBoxLayout.Direction.LeftToRight)
+        self.setDirection(QHBoxLayout.Direction.LeftToRight if self._right_side else
+                          QHBoxLayout.Direction.RightToLeft)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter if self._info_message else
                           Qt.AlignmentFlag.AlignLeft if self._right_side else Qt.AlignmentFlag.AlignRight)
         self.spacing = 6
@@ -71,6 +71,7 @@ class TelegramChatBubble(KitHBoxLayout):
         else:
             user_name = ""
         self._sender_label = KitLabel(user_name)
+        self._sender_label.main_palette = 'Success'
         self._sender_label.setContentsMargins(10, 2, 10, 2)
         self._main_widget.addWidget(self._sender_label)
 

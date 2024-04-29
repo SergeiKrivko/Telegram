@@ -1,5 +1,5 @@
 from pywtdlib.client import Client
-from typing import Callable, Optional
+from typing import Callable, Optional, Any, Type
 
 from lib import tg
 
@@ -25,6 +25,10 @@ class TgClient(Client):
         self._authorization_state = None
         self._authorization_handler = None
 
+        self._subscribers_all = []
+        self._routers: dict[Type: dict[tuple: Router]] = dict()
+        self._subscribers: dict[Type: list[Subscriber]] = dict()
+
         self.chats_is_loaded = False
 
         tg.client = self
@@ -35,15 +39,6 @@ class TgClient(Client):
 
     def func(self, dct):
         return self.tdjson.execute(dct)
-
-    def set_update_handler(self, update_handler: Callable) -> None:
-        super().set_update_handler(update_handler)
-
-    def set_error_handler(self, error_handler: Callable) -> None:
-        super().set_error_handler(error_handler)
-
-    def set_routine_handler(self, routine_handler: Callable) -> None:
-        super().set_error_handler(routine_handler)
 
     def set_authorization_handler(self, authorization_handler: Callable) -> None:
         self._authorization_handler = authorization_handler
@@ -83,6 +78,29 @@ class TgClient(Client):
         elif isinstance(self._authorization_state, tg.AuthorizationStateWaitPassword):
             self.send({"@type": "checkAuthenticationPassword", "password": str1})
 
+    def subscribe(self, event: Type, func: Callable, **kwargs) -> 'Subscriber':
+        if kwargs:
+            key = tuple(sorted(kwargs.keys()))
+            if event not in self._routers:
+                self._routers[event] = dict()
+            if key not in self._routers[event]:
+                router = Router(event, key)
+                self._routers[event][key] = router
+            else:
+                router = self._routers[event][key]
+            return router.subscribe(func, kwargs)
+        else:
+            if event not in self._subscribers:
+                self._subscribers[event] = []
+            subscriber = Subscriber(func, self._subscribers[event])
+            self._subscribers[event].append(subscriber)
+            return subscriber
+
+    def subscribe_all(self, func: Callable) -> 'Subscriber':
+        subscriber = Subscriber(func, self._subscribers_all)
+        self._subscribers_all.append(subscriber)
+        return subscriber
+
     def execute(self):
         # start the client by sending request to it
         self.get_authorization_state()
@@ -95,13 +113,43 @@ class TgClient(Client):
                     self.authenticate_user(event_dict)
 
                 event = tg.get_object(event_dict)
-                # print(event_dict)
+                if event.__class__ in self._subscribers:
+                    for el in self._subscribers[event.__class__]:
+                        el(event)
+                for el in self._subscribers_all:
+                    el(event)
 
-                if hasattr(self, "update_handler"):
-                    self.update_handler(event)
 
-                if event_dict["@type"] == "error":
-                    self.error_handler(event_dict)
+class Subscriber:
+    def __init__(self, func: Callable, lst: list):
+        self.func = func
+        self.__lst = lst
 
-            if hasattr(self, "routine_handler"):
-                self.routine_handler(event_dict)
+    def __call__(self, event):
+        return self.func(event)
+
+    def unsubscribe(self):
+        self.__lst.remove(self)
+
+
+class Router:
+    def __init__(self, event_class: Type, keys: tuple[str, ...]):
+        self.__event = event_class
+        self.__keys = keys
+
+        self.__subscribers: dict[tuple: list[Subscriber]] = dict()
+
+    def subscribe(self, func: Callable, keys: dict[str: Any]):
+        key = [keys[k] for k in self.__keys]
+        if key not in self.__subscribers:
+            self.__subscribers[key] = lst = []
+        else:
+            lst = self.__subscribers[key]
+        subscriber = Subscriber(func, lst)
+        lst.append(subscriber)
+        return subscriber
+
+    def __call__(self, event):
+        key = (getattr(event, key) for key in self.__keys)
+        for el in self.__subscribers.get(key, []):
+            el(event)

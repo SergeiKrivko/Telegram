@@ -4,9 +4,9 @@ from uuid import uuid4
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from src import config
 from lib import TgClient
 from lib import tg
+from src import config
 from src.settings_manager import SettingsManager
 
 
@@ -69,7 +69,7 @@ class TelegramManager(QThread):
                                 use_file_database=True,
                                 use_message_database=True)
         self._client.database_directory = f"{self._sm.app_data_dir}/Telegram/tdlib"
-        self._client.set_update_handler(self._handler)
+        self._client.subscribe_all(self._handler)
         self._client.console_authentication = False
         self._client.set_authorization_handler(self.authorization.emit)
 
@@ -83,6 +83,10 @@ class TelegramManager(QThread):
         self._supergroups = dict()
         self._chat_lists = {'All': tg.ChatListMain(), 'Archive': tg.ChatListArchive()}
         self.active_reactions = []
+
+        self._client.subscribe(tg.UpdateOption, self._options_handler)
+        self._client.subscribe(tg.UpdateActiveEmojiReactions, self._active_emoji_reactions_handler)
+        self._client.subscribe(tg.UpdateNewChat, self._new_chat_handler)
 
     def __getitem__(self, item):
         return self._options[item]
@@ -110,9 +114,6 @@ class TelegramManager(QThread):
         if file.id not in self._files:
             self._files[file.id] = file
 
-    def load_zip_project(self, path):
-        pass
-
     def load_minithumbnail(self, minithumbnail: tg.Minithumbnail):
         os.makedirs(f"{self._sm.app_data_dir}/Telegram/temp", exist_ok=True)
         with open(path := f"{self._sm.app_data_dir}/Telegram/temp/{uuid4()}.png", 'bw') as f:
@@ -122,26 +123,28 @@ class TelegramManager(QThread):
     def authenticate_user(self, str1, str2):
         self._client.send_authentication(str1, str2)
 
+    def _options_handler(self, event: tg.UpdateOption):
+        self._options[event.name] = None if not hasattr(event.value, 'value') else event.value.value
+
+    def _active_emoji_reactions_handler(self, event: tg.UpdateActiveEmojiReactions):
+        self.active_reactions = event.emojis
+
+    def _new_chat_handler(self, event: tg.UpdateNewChat):
+        self._chats[event.chat.id] = TgChat(**tg.to_json(event.chat))
+        self.updateChat.emit(str(event.chat.id))
+        if isinstance(event.chat.type, tg.ChatTypeSupergroup):
+            if event.chat.type.supergroup_id not in self._supergroups:
+                self._supergroups[event.chat.type.supergroup_id] = [None, None]
+            # tg.getSupergroup(event.chat.type.supergroup_id)
+            tg.getSupergroupFullInfo(event.chat.type.supergroup_id)
+
     def _handler(self, event):
         # event = events.convert_event(event_dict, self)
         # OPTIONS
 
-        if isinstance(event, tg.UpdateOption):
-            self._options[event.name] = None if not hasattr(event.value, 'value') else event.value.value
-        if isinstance(event, tg.UpdateActiveEmojiReactions):
-            self.active_reactions = event.emojis
-
         # CHATS
 
-        elif isinstance(event, tg.UpdateNewChat):
-            self._chats[event.chat.id] = TgChat(**tg.to_json(event.chat))
-            self.updateChat.emit(str(event.chat.id))
-            if isinstance(event.chat.type, tg.ChatTypeSupergroup):
-                if event.chat.type.supergroup_id not in self._supergroups:
-                    self._supergroups[event.chat.type.supergroup_id] = [None, None]
-                # tg.getSupergroup(event.chat.type.supergroup_id)
-                tg.getSupergroupFullInfo(event.chat.type.supergroup_id)
-        elif isinstance(event, tg.UpdateChatReadInbox):
+        if isinstance(event, tg.UpdateChatReadInbox):
             self._chats[event.chat_id].unread_count = event.unread_count
             self.updateChat.emit(str(event.chat_id))
         elif isinstance(event, tg.Chats):
